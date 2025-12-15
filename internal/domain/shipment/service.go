@@ -30,3 +30,10 @@ func (s *Service) CreateShipment(
 
 	return s.repo.Create(ctx, sh)
 }
+
+func (s *Service) GetByID(ctx context.Context, id int64) (Shipment, error) {
+	if id <= 0 {
+		return Shipment{}, ErrInvalidInput
+	}
+	return s.repo.FindByID(ctx, id)
+}
