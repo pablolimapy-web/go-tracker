@@ -137,3 +137,46 @@ func (r *ShipmentRepository) UpdateStatus(ctx context.Context, id int64, status 
 
 	return nil
 }
+
+func (r *ShipmentRepository) ListPending(ctx context.Context, limit int) ([]shipment.Shipment, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	const q = `
+        SELECT id, user_id, code, carrier, status, last_update_at, created_at
+        FROM shipments
+        WHERE status IN ('PENDING', 'IN_TRANSIT')
+        ORDER BY last_update_at ASC
+        LIMIT $1
+    `
+
+	rows, err := r.db.QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("ListPending query: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]shipment.Shipment, 0)
+	for rows.Next() {
+		var s shipment.Shipment
+		if err := rows.Scan(
+			&s.ID,
+			&s.UserID,
+			&s.Code,
+			&s.Carrier,
+			&s.Status,
+			&s.LastUpdateAt,
+			&s.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("ListPending scan: %w", err)
+		}
+		out = append(out, s)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ListPending rows: %w", err)
+	}
+
+	return out, nil
+}

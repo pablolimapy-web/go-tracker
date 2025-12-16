@@ -8,4 +8,5 @@ type Repository interface {
 	FindByID(ctx context.Context, id int64) (Shipment, error)
 	ListByUser(ctx context.Context, userID int64) ([]Shipment, error)
 	UpdateStatus(ctx context.Context, id int64, status Status) error
+	ListPending(ctx context.Context, limit int) ([]Shipment, error)
 }
