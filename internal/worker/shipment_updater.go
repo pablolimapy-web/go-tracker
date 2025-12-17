@@ -13,7 +13,6 @@ type ShipmentStatusProvider interface {
 	NextStatus(ctx context.Context, s shipment.Shipment) (shipment.Status, error)
 }
 
-// Provider mock: PENDING -> IN_TRANSIT -> DELIVERED
 type MockProvider struct{}
 
 func (p *MockProvider) NextStatus(ctx context.Context, s shipment.Shipment) (shipment.Status, error) {
@@ -33,6 +32,9 @@ type ShipmentUpdater struct {
 	interval    time.Duration
 	batchSize   int
 	concurrency int
+
+	workerID string
+	lockFor  time.Duration
 }
 
 func NewShipmentUpdater(
@@ -42,6 +44,7 @@ func NewShipmentUpdater(
 	batchSize int,
 	concurrency int,
 ) *ShipmentUpdater {
+
 	if batchSize <= 0 {
 		batchSize = 50
 	}
@@ -58,6 +61,9 @@ func NewShipmentUpdater(
 		interval:    interval,
 		batchSize:   batchSize,
 		concurrency: concurrency,
+
+		workerID: "worker-1",
+		lockFor:  45 * time.Second,
 	}
 }
 
@@ -82,7 +88,7 @@ func (u *ShipmentUpdater) Run(ctx context.Context) {
 }
 
 func (u *ShipmentUpdater) tick(ctx context.Context) {
-	shipments, err := u.repo.ListPending(ctx, u.batchSize)
+	shipments, err := u.repo.ClaimPending(ctx, u.batchSize, 45*time.Second, u.workerID)
 	if err != nil {
 		log.Printf("worker: ListPending error: %v", err)
 		return

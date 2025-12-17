@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 
@@ -19,36 +18,30 @@ func NewShipmentHandler(s *shipment.Service) *ShipmentHandler {
 	return &ShipmentHandler{service: s}
 }
 
+type createShipmentRequest struct {
+	Code    string `json:"code"`
+	Carrier string `json:"carrier"`
+}
+
 func (h *ShipmentHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Code    string `json:"code"`
-		Carrier string `json:"carrier"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	if body.Code == "" || body.Carrier == "" {
-		http.Error(w, "code and carrier are required", http.StatusBadRequest)
+	var req createShipmentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
 
-	// por enquanto mock; depois vem do JWT
+	// Sem auth por enquanto: user fixo (depois vira JWT)
 	userID := int64(1)
 
-	sh, err := h.service.CreateShipment(r.Context(), userID, body.Code, body.Carrier)
+	created, err := h.service.Create(r.Context(), userID, req.Code, req.Carrier)
 	if err != nil {
-		if errors.Is(err, shipment.ErrInvalidInput) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(sh)
+	_ = json.NewEncoder(w).Encode(created)
 }
 
 func (h *ShipmentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -59,14 +52,10 @@ func (h *ShipmentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sh, err := h.service.GetByID(r.Context(), id)
+	item, err := h.service.GetByID(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, shipment.ErrNotFound) {
+		if err == shipment.ErrNotFound {
 			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		if errors.Is(err, shipment.ErrInvalidInput) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -74,5 +63,19 @@ func (h *ShipmentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(sh)
+	_ = json.NewEncoder(w).Encode(item)
+}
+
+func (h *ShipmentHandler) List(w http.ResponseWriter, r *http.Request) {
+	// Sem auth por enquanto: user fixo (depois vira JWT)
+	userID := int64(1)
+
+	items, err := h.service.ListByUser(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(items)
 }

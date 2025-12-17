@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/pablolimapy-web/go-tracker/internal/domain/shipment"
 )
@@ -117,7 +118,9 @@ func (r *ShipmentRepository) UpdateStatus(ctx context.Context, id int64, status 
 	const q = `
         UPDATE shipments
         SET status = $1,
-            last_update_at = NOW()
+            last_update_at = NOW(),
+            locked_until = NULL,
+            locked_by = NULL
         WHERE id = $2
     `
 
@@ -137,27 +140,51 @@ func (r *ShipmentRepository) UpdateStatus(ctx context.Context, id int64, status 
 
 	return nil
 }
-
-func (r *ShipmentRepository) ListPending(ctx context.Context, limit int) ([]shipment.Shipment, error) {
+func (r *ShipmentRepository) ClaimPending(
+	ctx context.Context,
+	limit int,
+	lockFor time.Duration,
+	workerID string,
+) ([]shipment.Shipment, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	if lockFor <= 0 {
+		lockFor = 45 * time.Second
+	}
+	if workerID == "" {
+		workerID = "worker"
+	}
 
+	// Claim atômico:
+	// 1) escolhe jobs pendentes cujo lock expirou
+	// 2) FOR UPDATE SKIP LOCKED impede outra instância de pegar os mesmos
+	// 3) UPDATE marca locked_until/locked_by e retorna as linhas
 	const q = `
-        SELECT id, user_id, code, carrier, status, last_update_at, created_at
-        FROM shipments
-        WHERE status IN ('PENDING', 'IN_TRANSIT')
-        ORDER BY last_update_at ASC
-        LIMIT $1
+        WITH picked AS (
+            SELECT id
+            FROM shipments
+            WHERE status IN ('PENDING', 'IN_TRANSIT')
+              AND (locked_until IS NULL OR locked_until < NOW())
+            ORDER BY last_update_at ASC
+            LIMIT $1
+            FOR UPDATE SKIP LOCKED
+        )
+        UPDATE shipments s
+        SET locked_until = NOW() + ($2 || ' seconds')::interval,
+            locked_by = $3
+        FROM picked
+        WHERE s.id = picked.id
+        RETURNING s.id, s.user_id, s.code, s.carrier, s.status, s.last_update_at, s.created_at;
     `
 
-	rows, err := r.db.QueryContext(ctx, q, limit)
+	rows, err := r.db.QueryContext(ctx, q, limit, int(lockFor.Seconds()), workerID)
 	if err != nil {
-		return nil, fmt.Errorf("ListPending query: %w", err)
+		return nil, fmt.Errorf("ClaimPending query: %w", err)
 	}
 	defer rows.Close()
 
-	out := make([]shipment.Shipment, 0)
+	out := make([]shipment.Shipment, 0, limit)
 	for rows.Next() {
 		var s shipment.Shipment
 		if err := rows.Scan(
@@ -169,13 +196,13 @@ func (r *ShipmentRepository) ListPending(ctx context.Context, limit int) ([]ship
 			&s.LastUpdateAt,
 			&s.CreatedAt,
 		); err != nil {
-			return nil, fmt.Errorf("ListPending scan: %w", err)
+			return nil, fmt.Errorf("ClaimPending scan: %w", err)
 		}
 		out = append(out, s)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("ListPending rows: %w", err)
+		return nil, fmt.Errorf("ClaimPending rows: %w", err)
 	}
 
 	return out, nil

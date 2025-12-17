@@ -16,6 +16,7 @@ import (
 
 	"github.com/pablolimapy-web/go-tracker/internal/domain/shipment"
 	"github.com/pablolimapy-web/go-tracker/internal/http/handler"
+	"github.com/pablolimapy-web/go-tracker/internal/http/middleware"
 	"github.com/pablolimapy-web/go-tracker/internal/http/router"
 	"github.com/pablolimapy-web/go-tracker/internal/worker"
 )
@@ -47,7 +48,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         ":8080",
-		Handler:      r,
+		Handler:      middleware.CORS(r),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
